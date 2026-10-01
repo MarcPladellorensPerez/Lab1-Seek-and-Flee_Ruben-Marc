@@ -20,11 +20,17 @@ public class PlayerMovement : MonoBehaviour
     
     // Variable para controlar si el jugador puede moverse
     private bool canMove = true;
+    
+    // Enemigos en la escena para verificar si debemos huir
+    private EnemyController[] m_enemies;
 
     void Start()
     {
         controller = GetComponent<CharacterController>();
         if (m_animator == null) m_animator = GetComponent<Animator>();
+        
+        // Find all enemies in the scene to check their targets
+        m_enemies = FindObjectsByType<EnemyController>(FindObjectsSortMode.None);
     }
 
     void Update()
@@ -53,14 +59,47 @@ public class PlayerMovement : MonoBehaviour
             if (Keyboard.current.wKey.isPressed) vertical = 1f;
         }
 
-        Vector3 direction = new Vector3(horizontal, 0f, vertical).normalized;
+        Vector3 inputDirection = new Vector3(horizontal, 0f, vertical).normalized;
+        
+        // --- Flee Logic ---
+        Vector3 fleeDirection = Vector3.zero;
+        int fleeingFromCount = 0;
+        bool isFleeing = false;
+
+        foreach (var enemy in m_enemies)
+        {
+            if (enemy != null && enemy.PlayerTarget == this.gameObject)
+            {
+                // Vector Flee = Posicion(Player) - Posicion(Enemy)
+                Vector3 dirFromEnemy = transform.position - enemy.transform.position;
+                dirFromEnemy.y = 0f;
+                fleeDirection += dirFromEnemy.normalized;
+                fleeingFromCount++;
+            }
+        }
+
+        if (fleeingFromCount > 0)
+        {
+            isFleeing = true;
+            fleeDirection = (fleeDirection / fleeingFromCount).normalized;
+        }
 
         if (controller.isGrounded)
         {
-            if (direction.magnitude >= 0.1f)
+            if (isFleeing)
             {
-                // Calcular ángulo hacia donde queremos mirar (basado en la cámara)
-                float targetAngle = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
+                // Automatic Flee Movement
+                float targetAngle = Mathf.Atan2(fleeDirection.x, fleeDirection.z) * Mathf.Rad2Deg;
+                float angle = Mathf.SmoothDampAngle(transform.eulerAngles.y, targetAngle, ref turnSmoothVelocity, turnSmoothTime);
+                transform.rotation = Quaternion.Euler(0f, angle, 0f);
+
+                Vector3 moveDir = Quaternion.Euler(0f, targetAngle, 0f) * Vector3.forward;
+                moveDirection = moveDir.normalized * moveSpeed;
+            }
+            else if (inputDirection.magnitude >= 0.1f)
+            {
+                // Manual Movement
+                float targetAngle = Mathf.Atan2(inputDirection.x, inputDirection.z) * Mathf.Rad2Deg;
                 if (cameraTransform != null)
                 {
                     targetAngle += cameraTransform.eulerAngles.y;
@@ -96,15 +135,12 @@ public class PlayerMovement : MonoBehaviour
         // Actualizar Animador
         if (m_animator != null)
         {
-            // Usamos la intención de movimiento (input) en lugar de controller.velocity
-            // ya que a veces el CharacterController reporta 0 al deslizarse por colisiones invisibles.
             float targetSpeed = 0f;
-            if (direction.magnitude > 0.1f)
+            if (isFleeing || inputDirection.magnitude > 0.1f)
             {
                 targetSpeed = moveSpeed;
             }
             
-            // Hacemos una transición suave para que la animación no sea brusca
             float currentAnimSpeed = m_animator.GetFloat("SpeedMagnitude");
             float newAnimSpeed = Mathf.Lerp(currentAnimSpeed, targetSpeed, Time.deltaTime * 15f);
             

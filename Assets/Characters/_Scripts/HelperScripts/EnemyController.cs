@@ -11,15 +11,24 @@ public class EnemyController : MonoBehaviour
     private float m_detectionRange = 10.0f;
     public Vector3 LastKnownPlayerPosition { get; set; }
 
+    [Header("Seek Settings")]
+    public float moveSpeed = 3.5f;
+    public float turnSpeed = 5.0f;
+    
+    private Animator m_animator;
+
     private void Start()
     {
         LastKnownPlayerPosition = transform.position;
+        m_animator = GetComponentInChildren<Animator>();
     }
+    
     private void Update()
     {
         RaycastHit hit;
         Vector3 direction = m_playerReference.transform.position - transform.position;
         Physics.Raycast(transform.position, direction, out hit, m_detectionRange, m_playerLayerMask);
+        
         if (hit.collider != null && hit.collider.gameObject == m_playerReference)
         {
             PlayerTarget = hit.collider.gameObject;
@@ -30,6 +39,39 @@ public class EnemyController : MonoBehaviour
             PlayerTarget = null;
         }
 
+        // Apply Seek Behavior
+        if (PlayerTarget != null)
+        {
+            Seek(PlayerTarget.transform.position);
+            if (m_animator != null)
+            {
+                m_animator.SetFloat("SpeedMagnitude", moveSpeed);
+            }
+        }
+        else
+        {
+            if (m_animator != null)
+            {
+                m_animator.SetFloat("SpeedMagnitude", 0f);
+            }
+        }
+    }
+
+    private void Seek(Vector3 targetPos)
+    {
+        Vector3 direction = targetPos - transform.position;
+        direction.y = 0f; // Keep movement on the floor
+        
+        if (direction.magnitude > 0.1f)
+        {
+            Vector3 movement = direction.normalized * moveSpeed;
+            
+            float angle = Mathf.Rad2Deg * Mathf.Atan2(movement.x, movement.z);
+            Quaternion rotation = Quaternion.AngleAxis(angle, Vector3.up);
+            
+            transform.rotation = Quaternion.Slerp(transform.rotation, rotation, Time.deltaTime * turnSpeed);
+            transform.position += transform.forward.normalized * moveSpeed * Time.deltaTime;
+        }
     }
 
     private void OnDrawGizmos()
