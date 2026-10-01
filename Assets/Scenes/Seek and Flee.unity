@@ -18517,7 +18517,6 @@ GameObject:
   - component: {fileID: 145859634}
   - component: {fileID: 145859633}
   - component: {fileID: 145859632}
-  - component: {fileID: 145859636}
   - component: {fileID: 145859637}
   m_Layer: 0
   m_Name: Camera
@@ -18644,25 +18643,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &145859636
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 145859630}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 78d7b9af18e4e1e469eafeffe14fb898, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::CameraController
-  target: {fileID: 626286564}
-  offset: {x: 0, y: 1.5, z: 0}
-  distance: 5
-  xSpeed: 150
-  ySpeed: 150
-  yMinLimit: -20
-  yMaxLimit: 80
 --- !u!114 &145859637
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -18677,11 +18657,16 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CameraController
   target: {fileID: 626286564}
   offset: {x: 0, y: 1.5, z: 0}
-  distance: 5
-  xSpeed: 12
-  ySpeed: 12
-  yMinLimit: -10
-  yMaxLimit: 80
+  distance: 7
+  xSpeed: 10
+  ySpeed: 10
+  yMinLimit: 0
+  yMaxLimit: 50
+  collisionMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  cameraRadius: 0.3
+  minDistance: 0.5
 --- !u!1 &150074328
 GameObject:
   m_ObjectHideFlags: 0

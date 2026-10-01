@@ -15,6 +15,11 @@ public class CameraController : MonoBehaviour
     public float yMinLimit = -20f;
     public float yMaxLimit = 80f;
 
+    [Header("Collision Settings (Anti-Clipping)")]
+    public LayerMask collisionMask = ~0; // Por defecto colisiona con todo
+    public float cameraRadius = 0.3f; // Radio imaginario de la cámara para que no traspase paredes
+    public float minDistance = 0.5f; // Distancia mínima a la que se puede acercar la cámara al jugador
+
     private float x = 0.0f;
     private float y = 0.0f;
 
@@ -45,11 +50,30 @@ public class CameraController : MonoBehaviour
 
             Quaternion rotation = Quaternion.Euler(y, x, 0);
             
-            // Ajustar la posición basándose en la rotación y la distancia
-            Vector3 position = rotation * new Vector3(0.0f, 0.0f, -distance) + target.position + offset;
+            // Punto al que la cámara quiere mirar (cabeza del jugador)
+            Vector3 targetPivot = target.position + offset;
+            
+            // Posición ideal de la cámara si no hubiera paredes
+            Vector3 desiredCameraPos = rotation * new Vector3(0.0f, 0.0f, -distance) + targetPivot;
+
+            // --- SISTEMA ANTI-CLIPPING ---
+            Vector3 direction = desiredCameraPos - targetPivot;
+            float maxDistance = direction.magnitude;
+            
+            // Lanzamos una esfera imaginaria desde el jugador hacia la cámara
+            if (Physics.SphereCast(targetPivot, cameraRadius, direction.normalized, out RaycastHit hit, maxDistance, collisionMask))
+            {
+                // Si la esfera choca con una pared, acercamos la cámara al punto del choque
+                float hitDistance = Mathf.Clamp(hit.distance, minDistance, maxDistance);
+                transform.position = targetPivot + direction.normalized * hitDistance;
+            }
+            else
+            {
+                // Si no hay paredes, la cámara va a su posición ideal
+                transform.position = desiredCameraPos;
+            }
 
             transform.rotation = rotation;
-            transform.position = position;
         }
     }
 
