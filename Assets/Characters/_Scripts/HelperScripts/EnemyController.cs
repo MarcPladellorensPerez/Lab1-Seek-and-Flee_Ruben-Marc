@@ -15,6 +15,9 @@ public class EnemyController : MonoBehaviour
     public float moveSpeed = 3.5f;
     public float turnSpeed = 5.0f;
     
+    [Header("Flee Settings")]
+    public float fleeDistance = 5.0f;
+    
     private Animator m_animator;
 
     private void Start()
@@ -39,10 +42,20 @@ public class EnemyController : MonoBehaviour
             PlayerTarget = null;
         }
 
-        // Apply Seek Behavior
+        // Apply Seek/Flee Behavior
         if (PlayerTarget != null)
         {
-            Seek(PlayerTarget.transform.position);
+            float distanceToPlayer = Vector3.Distance(transform.position, PlayerTarget.transform.position);
+
+            if (distanceToPlayer < fleeDistance)
+            {
+                Flee(PlayerTarget.transform.position);
+            }
+            else
+            {
+                Seek(PlayerTarget.transform.position);
+            }
+            
             if (m_animator != null)
             {
                 m_animator.SetFloat("SpeedMagnitude", moveSpeed);
@@ -74,6 +87,24 @@ public class EnemyController : MonoBehaviour
         }
     }
 
+    private void Flee(Vector3 targetPos)
+    {
+        // La dirección para huir es desde el objetivo hacia nosotros
+        Vector3 direction = transform.position - targetPos;
+        direction.y = 0f; // Keep movement on the floor
+        
+        if (direction.magnitude > 0.1f)
+        {
+            Vector3 movement = direction.normalized * moveSpeed;
+            
+            float angle = Mathf.Rad2Deg * Mathf.Atan2(movement.x, movement.z);
+            Quaternion rotation = Quaternion.AngleAxis(angle, Vector3.up);
+            
+            transform.rotation = Quaternion.Slerp(transform.rotation, rotation, Time.deltaTime * turnSpeed);
+            transform.position += transform.forward.normalized * moveSpeed * Time.deltaTime;
+        }
+    }
+
     private void OnDrawGizmos()
     {
         Gizmos.color = Color.red;
@@ -88,5 +119,9 @@ public class EnemyController : MonoBehaviour
             }
         }
         Gizmos.DrawWireSphere(transform.position, m_detectionRange);
+
+        // Visualizar el rango de huida en amarillo
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, fleeDistance);
     }
 }
