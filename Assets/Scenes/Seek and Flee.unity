@@ -120621,6 +120621,11 @@ MonoBehaviour:
   cohesionWeight: 1
   alignWeight: 1
   separationWeight: 1.5
+  numLeaders: 2
+  leaderSpeed: 3
+  followLeaderWeight: 2
+  leaderArriveDistance: 2
+  leaderScale: 1.5
   rulesInterval: 0.2
   randomness: 0.2
   bounded: 1

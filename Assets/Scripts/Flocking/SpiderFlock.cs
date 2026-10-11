@@ -9,9 +9,24 @@ public class SpiderFlock : MonoBehaviour
     [HideInInspector]
     public float speed;
 
+    // Lo decide el manager con SetLeader. Los líderes no siguen a nadie, los seguidores siguen al líder más cercano
+    [HideInInspector]
+    public bool isLeader;
+
     // Dirección (normalizada, en el plano XZ) hacia la que queremos girar. La recalculan las reglas
     private Vector3 currentDirection;
     private float nextRulesTime;
+
+    // Para los líderes: el punto al que van ahora mismo y la escala original para poder restaurarla
+    private Vector3 leaderTarget;
+    private bool hasLeaderTarget;
+    private Vector3 baseScale;
+
+    void Awake()
+    {
+        // Guardamos la escala original antes de que el manager nos haga más grandes si somos líder
+        baseScale = transform.localScale;
+    }
 
     void Start()
     {
@@ -32,6 +47,18 @@ public class SpiderFlock : MonoBehaviour
 
         // Desfasamos el primer cálculo de cada araña para que no calculen todas en el mismo frame
         nextRulesTime = Time.time + Random.Range(0f, myManager.rulesInterval);
+    }
+
+    // El manager llama a esto para convertir a la araña en líder o devolverla a seguidora
+    public void SetLeader(bool value)
+    {
+        isLeader = value;
+
+        // Si cambia de rol, que elija un punto nuevo la próxima vez
+        hasLeaderTarget = false;
+
+        // Los líderes se ven más grandes para distinguirlos
+        transform.localScale = value ? baseScale * myManager.leaderScale : baseScale;
     }
 
     void Update()
@@ -57,6 +84,13 @@ public class SpiderFlock : MonoBehaviour
 
     void ApplyFlockingRules()
     {
+        // Los líderes no aplican las reglas del grupo: van a lo suyo
+        if (isLeader)
+        {
+            ApplyLeaderRules();
+            return;
+        }
+
         FlockManager m = myManager;
 
         Vector3 cohesion = Vector3.zero;
@@ -64,6 +98,11 @@ public class SpiderFlock : MonoBehaviour
         Vector3 separation = Vector3.zero;
         float neighbourSpeed = 0f;
         int numNeighbours = 0;
+
+        // Para guardar cuál es el líder más cercano (esté en el radio de vecindad o no)
+        SpiderFlock nearestLeader = null;
+        Vector3 offsetToLeader = Vector3.zero;
+        float nearestLeaderSqr = float.MaxValue;
 
         // Comparamos distancias al cuadrado para no hacer una raíz cuadrada por cada vecino
         float neighbourSqr = m.neighbourDistance * m.neighbourDistance;
@@ -78,6 +117,14 @@ public class SpiderFlock : MonoBehaviour
             Vector3 offset = other.transform.position - transform.position;
             offset.y = 0f;
             float sqrDistance = offset.sqrMagnitude;
+
+            // Esto va antes del continue de abajo: al líder lo seguimos aunque esté lejos
+            if (other.isLeader && sqrDistance < nearestLeaderSqr)
+            {
+                nearestLeaderSqr = sqrDistance;
+                nearestLeader = other;
+                offsetToLeader = offset;
+            }
 
             if (sqrDistance > neighbourSqr) continue;
 
@@ -114,7 +161,11 @@ public class SpiderFlock : MonoBehaviour
                        + Vector3.ClampMagnitude(separation, 1f) * m.separationWeight;
         }
 
-        // Opcional: un líder o punto al que el grupo tiende a ir
+        // Seguir al líder más cercano: es lo que hace que con varios líderes el grupo se reparta en subgrupos
+        if (nearestLeader != null)
+            direction += offsetToLeader.normalized * m.followLeaderWeight;
+
+        // Opcional: un punto al que el grupo tiende a ir
         if (m.goal != null)
         {
             Vector3 toGoal = m.goal.position - transform.position;
@@ -140,6 +191,48 @@ public class SpiderFlock : MonoBehaviour
         direction.y = 0f;
 
         // Si por algún motivo todo se ha cancelado, nos quedamos con la dirección anterior
+        if (direction.sqrMagnitude > 0.0001f)
+            currentDirection = direction.normalized;
+    }
+
+    // El líder va hacia un punto: el goal del manager si hay, y si no, uno aleatorio dentro de la zona
+    void ApplyLeaderRules()
+    {
+        FlockManager m = myManager;
+
+        Vector3 target;
+
+        if (m.goal != null)
+        {
+            target = m.goal.position;
+        }
+        else
+        {
+            Vector3 toPoint = leaderTarget - transform.position;
+            toPoint.y = 0f;
+
+            // Si no tenemos punto o ya hemos llegado, elegimos otro dentro de la zona
+            if (!hasLeaderTarget || toPoint.magnitude < m.leaderArriveDistance)
+            {
+                leaderTarget = m.transform.position + new Vector3(
+                    Random.Range(-m.roamLimits.x, m.roamLimits.x),
+                    0f,
+                    Random.Range(-m.roamLimits.z, m.roamLimits.z));
+                hasLeaderTarget = true;
+            }
+
+            target = leaderTarget;
+        }
+
+        Vector3 direction = target - transform.position;
+        direction.y = 0f;
+
+        // Si vamos hacia el goal y ya hemos llegado, el líder se para; si no, va a su velocidad
+        if (m.goal != null && direction.magnitude < m.leaderArriveDistance)
+            speed = 0f;
+        else
+            speed = m.leaderSpeed;
+
         if (direction.sqrMagnitude > 0.0001f)
             currentDirection = direction.normalized;
     }

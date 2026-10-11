@@ -24,6 +24,18 @@ public class FlockManager : MonoBehaviour
     public float alignWeight = 1f;
     public float separationWeight = 1.5f;
 
+    [Header("Líderes")]
+    [Tooltip("Cuántas arañas son líderes. Se puede cambiar con el juego en marcha")]
+    [Min(0)] public int numLeaders = 2;
+    [Tooltip("Velocidad a la que se mueven los líderes")]
+    [Range(0.0f, 10.0f)] public float leaderSpeed = 3.0f;
+    [Tooltip("Cuánto tira el líder más cercano de cada seguidor")]
+    public float followLeaderWeight = 2f;
+    [Tooltip("Distancia a la que un líder da por alcanzado su punto y elige otro")]
+    public float leaderArriveDistance = 2f;
+    [Tooltip("Cuánto más grandes se ven los líderes, para distinguirlos")]
+    public float leaderScale = 1.5f;
+
     [Header("Extras")]
     [Tooltip("Cada cuántos segundos recalcula cada araña las reglas. 0 = cada frame, como en las diapos")]
     [Range(0f, 1f)] public float rulesInterval = 0.2f;
@@ -33,12 +45,11 @@ public class FlockManager : MonoBehaviour
     public bool bounded = true;
     [Tooltip("Mitad del ancho en X y en Z de la zona por la que pueden moverse")]
     public Vector3 roamLimits = new Vector3(15, 0, 15);
-    [Tooltip("Opcional: un líder o punto al que el grupo tiende a ir (por ejemplo, el jugador)")]
+    [Tooltip("Opcional: un punto al que el grupo tiende a ir (por ejemplo, el jugador). Si hay, los líderes van hacia él")]
     public Transform goal;
     public float goalWeight = 0.5f;
 
-    // Guardamos directamente el componente SpiderFlock de cada araña:
-    // así los vecinos no tienen que hacer GetComponent en cada frame
+    // Guardamos directamente el componente SpiderFlock de cada araña así los vecinos no tienen que hacer GetComponent en cada frame
     [HideInInspector]
     public SpiderFlock[] allSpiders;
 
@@ -53,7 +64,7 @@ public class FlockManager : MonoBehaviour
         allSpiders = new SpiderFlock[numSpiders];
         for (int i = 0; i < numSpiders; i++)
         {
-            // Posición aleatoria dentro de los límites (manteniendo la altura del spawner)
+            // Posición aleatoria dentro de los límites manteniendo la altura del spawner
             Vector3 pos = this.transform.position + new Vector3(
                 Random.Range(-spawnLimits.x, spawnLimits.x),
                 0, // 0 para mantenerlas en el suelo
@@ -68,12 +79,34 @@ public class FlockManager : MonoBehaviour
             allSpiders[i] = go.GetComponent<SpiderFlock>();
             allSpiders[i].myManager = this;
         }
+
+        // Una vez creadas todas, decidimos cuáles son líderes
+        AssignLeaders();
     }
 
-    // Evita que la velocidad mínima sea mayor que la máxima al tocar los valores en el Inspector
+    // Las primeras numLeaders arañas del array son líderes y el resto seguidoras.
+    // Es pública para poder llamarla desde fuera si hiciera falta
+    public void AssignLeaders()
+    {
+        if (allSpiders == null) return;
+
+        // Si piden más líderes que arañas, todas serían líderes y no habría grupo
+        int n = Mathf.Clamp(numLeaders, 0, allSpiders.Length);
+
+        for (int i = 0; i < allSpiders.Length; i++)
+        {
+            if (allSpiders[i] != null)
+                allSpiders[i].SetLeader(i < n);
+        }
+    }
+
     void OnValidate()
     {
+        // Evita que la velocidad mínima sea mayor que la máxima al tocar los valores en el Inspector
         if (maxSpeed < minSpeed) maxSpeed = minSpeed;
+
+        // Si cambiamos numLeaders con el juego en marcha, se reparten los roles otra vez
+        if (Application.isPlaying) AssignLeaders();
     }
 
     // Dibuja las zonas al seleccionar el manager: amarillo = spawn, cian = zona por la que se mueven
