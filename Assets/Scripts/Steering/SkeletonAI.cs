@@ -1,143 +1,232 @@
+using System.Collections;
 using UnityEngine;
+using UnityEngine.AI;
 
+
+[RequireComponent(typeof(NavMeshAgent))]
 public class SkeletonAI : MonoBehaviour
 {
-    // Objetivo al que vamos a perseguir o del que vamos a huir. En este caso, el jugador
+    [Header("Objetivo")]
+    // Objetivo
     public GameObject target;
 
+    [Header("Distancias de Decisión")]
     // Distancia a la que queremos estar del jugador. Si estamos más lejos, vamos hacia él y si estamos más cerca, huimos
     public float safeDistance = 8f;
-    // Margen de tolerancia alrededor de safeDistance. Sin él, justo en el límite cambiaba de seek a flee en cada frame y se quedaba temblando
     public float tolerance = 0.5f;
 
-    // Cuánto acelera, cuánto frena y la velocidad máxima de movimiento
-    public float acceleration = 8f;
-    public float deceleration = 12f;
+    [Header("Parámetros de Movimiento")]
+    // Velocidad y aceleración que aplicamos al NavMeshAgent
     public float maxSpeed = 4f;
-    // Lo mismo pero para el giro, para que no se dé la vuelta de golpe
+    public float acceleration = 8f;
+    public float angularSpeed = 360f;
+
+    public float deceleration = 12f;
     public float turnAcceleration = 20f;
     public float maxTurnSpeed = 8f;
-    // Si el ángulo entre hacia donde miramos y hacia donde queremos ir es mayor que esto, primero giramos y luego avanzamos
     public float maxAngleToMove = 60f;
 
-    // Lo necesitamos para que se reproduzca la animación de andar
+    [Header("Comportamiento NavMesh")]
+    // Cada cuánto recalculamos el destino en Seek/Flee para no saturar con llamadas de repath continuo
+    public float repathInterval = 0.2f;
+    // Distancia hacia la que proyectamos el destino de huida en el NavMesh
+    public float fleeDistance = 6f;
+
+    [Header("NavMesh Link Jump")]
+    public float jumpHeight = 1.5f;
+    public float jumpDuration = 0.8f;
+
+    [Header("Animación")]
+    // Referencia al Animator para sincronizar la velocidad de la animación
     public Animator animator;
 
     // Los tres estados posibles según la distancia al objetivo
     enum Mode { Idle, Seek, Flee }
     Mode mode = Mode.Idle;
 
-    // Dirección a la que queremos ir (normalizada, en el plano XZ) y rotación que queremos que tenga
-    Vector3 desiredDirection;
-    Quaternion rotation;
-    // Velocidades actuales (van subiendo poco a poco hasta el máximo)
-    float movSpeed = 0f;
-    float turnSpeed = 0f;
+    NavMeshAgent agent;
+    float nextRepathTime;
+    bool isTraversingLink = false;
 
-    // Buscar el parámetro por string en cada frame es lento: guardamos su hash una sola vez
     static readonly int SpeedMagnitudeHash = Animator.StringToHash("SpeedMagnitude");
+
+    // Ángulos que evaluamos al buscar un punto de huida en el NavMesh (0 = lado contrario al objetivo)
+    static readonly float[] fleeAngles = { 0f, 30f, -30f, 60f, -60f, 90f, -90f };
 
     void Awake()
     {
-        // Si se nos ha olvidado arrastrar el Animator, lo cogemos del propio objeto o de un hijo (el modelo suele ser un hijo)
+        agent = GetComponent<NavMeshAgent>();
         if (animator == null) animator = GetComponentInChildren<Animator>();
 
-        // Un Quaternion sin inicializar vale (0,0,0,0), que no es una rotación válida
-        rotation = transform.rotation;
-        desiredDirection = transform.forward;
+        agent.speed = maxSpeed;
+        agent.acceleration = acceleration;
+        agent.angularSpeed = angularSpeed;
+
+        agent.autoTraverseOffMeshLink = false;
     }
 
     void Update()
     {
-        // Sin objetivo no hay nada que hacer
-        if (target == null) return;
+        if (target == null || !agent.isOnNavMesh) return;
 
-        // Distancia solo en el plano del suelo (x, z), como en la fórmula de la diapo 11.
-        // Así no influye la altura del pivote del jugador respecto al del esqueleto
+        
+        if (agent.isOnOffMeshLink && !isTraversingLink)
+        {
+            StartCoroutine(TraverseOffMeshLink());
+            return;
+        }
+
+        if (isTraversingLink) return;
+
         Vector3 toTarget = target.transform.position - transform.position;
         toTarget.y = 0f;
         float distance = toTarget.magnitude;
 
-        // Aquí es donde decidimos nosotros si hacer seek o flee según la distancia
+        // Determinamos el modo (Seek, Flee o Idle) en función de las zonas
         Mode newMode;
         if (distance > safeDistance + tolerance) newMode = Mode.Seek;
         else if (distance < safeDistance - tolerance) newMode = Mode.Flee;
         else newMode = Mode.Idle;
 
-        // Al cambiar de estado reiniciamos la velocidad de giro: así turnAcceleration
-        // se nota cada vez que cambia de idea y no solo la primera vez
-        if (newMode != mode)
+        bool modeChanged = newMode != mode;
+        mode = newMode;
+
+        if (mode == Mode.Idle)
         {
-            mode = newMode;
-            turnSpeed = 0f;
+            // Zona neutra: detenemos el camino y nos encaramos al jugador
+            if (modeChanged) agent.ResetPath();
+            FaceTarget(toTarget);
         }
+        else if (modeChanged || Time.time >= nextRepathTime)
+        {
+            nextRepathTime = Time.time + repathInterval;
 
-        // Calculamos hacia dónde queremos ir. En Idle también miramos al objetivo, pero sin avanzar
-        if (mode == Mode.Flee) Flee();
-        else Seek();
-
-        // Subimos la velocidad de giro sin pasarnos del máximo
-        turnSpeed = Mathf.Min(turnSpeed + turnAcceleration * Time.deltaTime, maxTurnSpeed);
-
-        // Giramos poco a poco hacia la rotación objetivo (Slerp suaviza el giro)
-        transform.rotation = Quaternion.Slerp(
-            transform.rotation,
-            rotation,
-            Time.deltaTime * turnSpeed
-        );
-
-        // Solo avanzamos si ya estamos mirando más o menos hacia donde queremos ir (Vector3.Angle, diapo 11).
-        // Sin esto, al pasar de seek a flee seguiría caminando hacia el jugador mientras se da la vuelta
-        float angle = Vector3.Angle(transform.forward, desiredDirection);
-        float targetSpeed = (mode != Mode.Idle && angle <= maxAngleToMove) ? maxSpeed : 0f;
-
-        // Aceleramos hacia la velocidad objetivo, y si hay que frenar lo hacemos poco a poco (no de golpe)
-        float rate = targetSpeed > movSpeed ? acceleration : deceleration;
-        movSpeed = Mathf.MoveTowards(movSpeed, targetSpeed, rate * Time.deltaTime);
-
-        // Avanzamos hacia donde está mirando el personaje.
-        // Time.deltaTime hace que vaya igual de rápido con cualquier FPS
-        transform.position += transform.forward * movSpeed * Time.deltaTime;
+            if (mode == Mode.Seek) Seek();
+            else Flee();
+        }
 
         SetAnimation();
     }
 
-    // Seek: la dirección es del esqueleto hacia el jugador
+    // Seek: el destino es la posición del jugador en el NavMesh
     void Seek()
     {
-        Steer(target.transform.position - transform.position);
+        if (NavMesh.SamplePosition(target.transform.position, out NavMeshHit hit, 2f, agent.areaMask))
+        {
+            agent.SetDestination(hit.position);
+        }
+        else
+        {
+            agent.SetDestination(target.transform.position);
+        }
     }
 
-    // Flee: es lo mismo que Seek pero restando al revés, así la dirección sale opuesta
+    // Flee: calcula un punto de escape en el NavMesh en dirección opuesta al jugador
     void Flee()
     {
-        Steer(transform.position - target.transform.position);
+        Vector3 pos = transform.position;
+        Vector3 targetPos = target.transform.position;
+
+        Vector3 away = pos - targetPos;
+        away.y = 0f;
+        away = away.sqrMagnitude > 0.0001f ? away.normalized : transform.forward;
+
+        float bestDistance = FlatDistance(pos, targetPos);
+        Vector3 bestPoint = pos;
+        bool found = false;
+
+        foreach (float angle in fleeAngles)
+        {
+            Vector3 candidate = pos + Quaternion.Euler(0f, angle, 0f) * away * fleeDistance;
+
+            // NavMesh.Raycast comprueba si hay un borde o pared en el camino; si lo hay, devuelve el punto límite
+            Vector3 reachable = NavMesh.Raycast(pos, candidate, out NavMeshHit hit, agent.areaMask)
+                ? hit.position
+                : candidate;
+
+            float d = FlatDistance(reachable, targetPos);
+            if (d > bestDistance)
+            {
+                bestDistance = d;
+                bestPoint = reachable;
+                found = true;
+            }
+        }
+
+        if (found) agent.SetDestination(bestPoint);
+        else agent.ResetPath(); // Si está acorralado sin salida
     }
 
-    // Parte común de Seek y Flee: de una dirección saca la rotación que queremos tener
-    void Steer(Vector3 direction)
+    // Cruce del NavMeshLink
+    IEnumerator TraverseOffMeshLink()
     {
-        // Ponemos la Y a 0 para movernos solo por el suelo, si no se hundiría o subiría
-        direction.y = 0f;
+        isTraversingLink = true;
 
-        // Si el objetivo está justo encima, Atan2(0, 0) daría un ángulo sin sentido
-        if (direction.sqrMagnitude < 0.0001f) return;
+        OffMeshLinkData data = agent.currentOffMeshLinkData;
+        Vector3 startPos = transform.position;
+        Vector3 endPos = data.endPos + Vector3.up * agent.baseOffset;
 
-        desiredDirection = direction.normalized;
+        Vector3 jumpDir = endPos - startPos;
+        jumpDir.y = 0f;
+        if (jumpDir.sqrMagnitude > 0.001f)
+        {
+            Quaternion targetRotation = Quaternion.LookRotation(jumpDir);
+            float rotTimer = 0f;
+            while (rotTimer < 0.15f)
+            {
+                transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotTimer / 0.15f);
+                rotTimer += Time.deltaTime;
+                yield return null;
+            }
+            transform.rotation = targetRotation;
+        }
 
-        // Pasamos esa dirección a un ángulo en el eje Y para saber hacia dónde girar
-        float angle = Mathf.Rad2Deg * Mathf.Atan2(desiredDirection.x, desiredDirection.z);
-        rotation = Quaternion.AngleAxis(angle, Vector3.up);
+        if (animator != null)
+            animator.SetFloat(SpeedMagnitudeHash, maxSpeed);
+
+      
+        float timer = 0f;
+        while (timer < jumpDuration)
+        {
+            float t = timer / jumpDuration;
+            float yOffset = 4f * jumpHeight * t * (1f - t);
+
+            transform.position = Vector3.Lerp(startPos, endPos, t) + Vector3.up * yOffset;
+
+            timer += Time.deltaTime;
+            yield return null;
+        }
+
+        transform.position = endPos;
+
+        agent.CompleteOffMeshLink();
+        isTraversingLink = false;
     }
 
-    // Le pasamos la velocidad al Animator (con el parámetro SpeedMagnitude) para que ande en vez de deslizarse
+    // Gira al personaje hacia el objetivo cuando está en modo Idle
+    void FaceTarget(Vector3 toTarget)
+    {
+        if (toTarget.sqrMagnitude < 0.0001f) return;
+
+        Quaternion look = Quaternion.LookRotation(toTarget);
+        transform.rotation = Quaternion.RotateTowards(transform.rotation, look, angularSpeed * Time.deltaTime);
+    }
+
+    static float FlatDistance(Vector3 a, Vector3 b)
+    {
+        a.y = 0f;
+        b.y = 0f;
+        return Vector3.Distance(a, b);
+    }
+
+    // Envía la velocidad actual al Animator para las transiciones del Blend Tree
     void SetAnimation()
     {
-        if (animator != null)
-            animator.SetFloat(SpeedMagnitudeHash, movSpeed);
+        if (animator != null && agent != null)
+            animator.SetFloat(SpeedMagnitudeHash, agent.velocity.magnitude);
     }
 
-    // Dibuja las zonas en el editor al seleccionar el objeto: fuera de la verde hace seek, dentro de la roja hace flee
+    // Dibuja las zonas de decisión en la Scene View al seleccionar el esqueleto
     void OnDrawGizmosSelected()
     {
         Gizmos.color = Color.green;

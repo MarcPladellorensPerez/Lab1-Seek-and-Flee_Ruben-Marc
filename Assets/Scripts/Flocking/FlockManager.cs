@@ -49,7 +49,6 @@ public class FlockManager : MonoBehaviour
     public Transform goal;
     public float goalWeight = 0.5f;
 
-    // Guardamos directamente el componente SpiderFlock de cada araña así los vecinos no tienen que hacer GetComponent en cada frame
     [HideInInspector]
     public SpiderFlock[] allSpiders;
 
@@ -64,33 +63,27 @@ public class FlockManager : MonoBehaviour
         allSpiders = new SpiderFlock[numSpiders];
         for (int i = 0; i < numSpiders; i++)
         {
-            // Posición aleatoria dentro de los límites manteniendo la altura del spawner
             Vector3 pos = this.transform.position + new Vector3(
                 Random.Range(-spawnLimits.x, spawnLimits.x),
-                0, // 0 para mantenerlas en el suelo
+                0, 
                 Random.Range(-spawnLimits.z, spawnLimits.z));
 
-            // Rotación inicial aleatoria solo en el eje Y. Con Euler nunca nos sale un vector de dirección a cero
             Quaternion rot = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
 
             GameObject go = Instantiate(spiderPrefab, pos, rot);
 
-            // Le pasamos la referencia del manager a cada araña
             allSpiders[i] = go.GetComponent<SpiderFlock>();
             allSpiders[i].myManager = this;
         }
 
-        // Una vez creadas todas, decidimos cuáles son líderes
         AssignLeaders();
     }
 
-    // Las primeras numLeaders arañas del array son líderes y el resto seguidoras.
-    // Es pública para poder llamarla desde fuera si hiciera falta
+   
     public void AssignLeaders()
     {
         if (allSpiders == null) return;
 
-        // Si piden más líderes que arañas, todas serían líderes y no habría grupo
         int n = Mathf.Clamp(numLeaders, 0, allSpiders.Length);
 
         for (int i = 0; i < allSpiders.Length; i++)
@@ -102,14 +95,11 @@ public class FlockManager : MonoBehaviour
 
     void OnValidate()
     {
-        // Evita que la velocidad mínima sea mayor que la máxima al tocar los valores en el Inspector
         if (maxSpeed < minSpeed) maxSpeed = minSpeed;
 
-        // Si cambiamos numLeaders con el juego en marcha, se reparten los roles otra vez
         if (Application.isPlaying) AssignLeaders();
     }
 
-    // Dibuja las zonas al seleccionar el manager: amarillo = spawn, cian = zona por la que se mueven
     void OnDrawGizmosSelected()
     {
         Gizmos.color = Color.yellow;
